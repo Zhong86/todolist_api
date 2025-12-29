@@ -3,6 +3,7 @@
 Tools: <br>
 -Express <br>
 -MongoDB <br>
+-JWT Auth <br>
 
 [] User registration to create a new user <br>
 [] Login endpoint to authenticate the user and generate a token <br>
