@@ -13,18 +13,32 @@ router.get('/todos', authMiddleware, async (req, res) => {
     const limit = parseInt(req.query.limit) || 10; 
     const skip = (page - 1) * limit; 
 
-    const todos = await Todo.find({ userId: req.userId }); 
+    const todos = await Todo.find({ userId: req.userId })
       .skip(skip).limit(limit).sort({ createdAt: -1 }); 
 
     //get total count for pagination info
     const total = await Todo.countDocuments({ userId: req.userId }); 
-
-    res.json({ 
+    const todosData = {
       data: todos, 
       page, 
       limit, 
       total
-    }); 
+    }; 
+    
+    //filter
+    const { term } = req.query; 
+    if(!term)
+      return res.status(200).json(todosData); 
+    
+    const filteredTodos = todos.filter(todo => {
+      const searchTerm = term.toLowerCase(); 
+      return (
+        todo.title?.toLowerCase().includes(searchTerm)
+        || todo.description?.toLowerCase().includes(searchTerm)        
+      ); 
+    });
+
+    res.status(200).json(filteredTodos); 
   } catch (error) {
     res.status(500).json({ error: error.message }); 
   }
@@ -56,7 +70,7 @@ router.put('/todos/:id', authMiddleware, async (req, res) => {
     ); 
 
     if (!todo) {
-      return res.status(404).json({ error: 'Todo not fount' }); 
+      return res.status(404).json({ error: 'Todo not found' }); 
     }
 
     res.json(todo); 

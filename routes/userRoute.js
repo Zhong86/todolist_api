@@ -32,7 +32,7 @@ router.post('/register', async (req, res) => {
     if(newUser == null) return res.status(400).json({ message: error.message }); 
 
     //return token from JWT
-    const userData = { name: newUser.name, email: newUser.email };
+    const userData = { userId: newUser._id, email: newUser.email };
     const newToken = jwt.sign(userData, tokenSecret);
 
     res.status(201).json({ token: newToken });
@@ -52,7 +52,7 @@ router.post('/login', async (req, res) => {
 
     if(correct) {
       //generate token
-      const userData = { name: user.name, email: user.email };
+      const userData = { userId: user._id, email: user.email };
       const token = jwt.sign(userData, tokenSecret);
 
       res.status(200).json({ token: token });
