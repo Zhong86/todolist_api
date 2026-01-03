@@ -13,7 +13,11 @@ const userSchema = new mongoose.Schema({
     password: {
         type: String, 
         required: true
-    }
+    }, 
+  refreshTokens: [{
+    token: String, 
+    createdAt: { type: Date, default: Date.now, expires: 604800 } //7 days
+  }]
 });
 
 module.exports = mongoose.model('User', userSchema); 
