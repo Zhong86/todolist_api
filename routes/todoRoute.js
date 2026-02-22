@@ -1,6 +1,5 @@
 const express = require('express'); 
 const router = express.Router(); 
-const jwt = require('jsonwebtoken'); 
 const rateLimit = require('express-rate-limit'); 
 const { authMiddleware } = require('../middleware/auth'); 
 const { pool } = require('../db');
@@ -17,24 +16,17 @@ router.get('/todos', authMiddleware, async (req, res) => {
     //pagination to control data flow
     const page = parseInt(req.query.page) || 1; 
     const limit = parseInt(req.query.limit) || 10; 
-    const skip = (page - 1) * limit; 
+    const offset = (page - 1) * limit; 
 
-    const todos = await Todo.find({ userId: req.user.userId })
-      .skip(skip).limit(limit).sort({ createdAt: -1 }); 
-
-    //get total count for pagination info
-    const total = await Todo.countDocuments({ userId: req.user.userId }); 
-    const todosData = {
-      data: todos, 
-      page, 
-      limit, 
-      total
-    }; 
+    const [todos] = await pool.execute(
+      'SELECT title, description FROM todo WHERE user_id = ? LIMIT ? OFFSET ?', 
+      [req.user.userId, limit, offset]
+    );
     
     //filter
     const { term } = req.query; 
     if(!term)
-      return res.status(200).json(todosData); 
+      return res.status(200).json(todos); 
     
     const filteredTodos = todos.filter(todo => {
       const searchTerm = term.toLowerCase(); 
@@ -53,33 +45,31 @@ router.get('/todos', authMiddleware, async (req, res) => {
 //CREATE TODO
 router.post('/todos', authMiddleware, todoLimiter, async (req, res) => {
   try {
-    const todo = new Todo({
-      title: req.body.title, 
-      description: req.body.description, 
-      userId: req.user.userId
-    }); 
+    const [result] = await pool.execute(
+      'INSERT INTO todo (title, description, user_id) VALUES (?,?,?)', 
+      [req.body.title, req.body.description, req.user.userId]
+    );
 
-    await todo.save(); 
-    res.status(201).json(todo); 
+    if(result.affectedRows > 0)
+      return res.status(201).json({ message: 'Todo created' });
+    else return res.status(400).json({ error: 'Failed to create todo' }); 
   } catch (error) {
-    res.status(400).json({ error: error.message }); 
+    res.status(500).json({ error: error.message }); 
   }
 }); 
 
 //UPDATE
 router.put('/todos/:id', authMiddleware, todoLimiter,async (req, res) => {
   try {
-    const todo = await Todo.findOneAndUpdate(
-      {_id: req.params.id, userId: req.user.userId }, 
-      req.body, 
-      { new: true }
-    ); 
+    const [result] = await pool.execute(
+      'UPDATE todo SET title = ?, description = ? WHERE id = ?', 
+      [req.body.title, req.body.description, req.params.id]
+    );
 
-    if (!todo) {
+    if (result.affectedRows <= 0) {
       return res.status(404).json({ error: 'Todo not found' }); 
     }
-
-    res.json(todo); 
+    return res.status(200).json({ message: 'Updated todo' }); 
   } catch (error) {
     res.status(400).json({error: error.message }); 
   }
@@ -88,16 +78,15 @@ router.put('/todos/:id', authMiddleware, todoLimiter,async (req, res) => {
 //DELETE
 router.delete('/todos/:id', authMiddleware, todoLimiter,async (req, res) => {
   try {
-    const todo = await Todo.findOneAndDelete({
-      _id: req.params.id, 
-      userId: req.user.userId
-    }); 
-
-    if (!todo) {
+    const [result] = await pool.execute(
+      'DELETE FROM todo WHERE id = ?', 
+      [req.params.id]
+    );
+    if (result.affectedRows <= 0) {
       return res.status(404).json({ error: 'Todo not found' }); 
     }
 
-    res.json({ message: 'Todo deleted' }); 
+    res.status(200).json({ message: 'Todo deleted' }); 
   } catch (error) {
     res.status(500).json({ error: error.message }); 
   }

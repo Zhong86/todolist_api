@@ -2,7 +2,7 @@
 
 Tools: <br>
 -Express <br>
--MariaDB <br>
+-MySQL <br>
 -JWT Auth <br>
 
 [x] User registration to create a new user <br>

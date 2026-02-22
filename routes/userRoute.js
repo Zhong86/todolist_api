@@ -7,9 +7,6 @@ const rateLimit = require('express-rate-limit');
 const { authMiddleware } = require('../middleware/auth'); 
 const { pool } = require('../db');
 
-// const ACCESS_TOKEN = '1d75ffdd91e81516eff0a932ed77c8f5';
-// const REFRESH_TOKEN = '1d75fffeia0981jf9asaa932ed77c8f5';
-
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, //15 minutes
   max: 5, //5 req per 15 minutes
