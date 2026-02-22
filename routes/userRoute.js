@@ -1,15 +1,14 @@
 require('dotenv').config(); 
 const express = require('express');
 const router = express.Router(); 
-const mongoose = require('mongoose');
-const User = require('../models/User');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit'); 
 const { authMiddleware } = require('../middleware/auth'); 
+const { pool } = require('../db');
 
-const ACCESS_TOKEN = '1d75ffdd91e81516eff0a932ed77c8f5';
-const REFRESH_TOKEN = '1d75fffeia0981jf9asaa932ed77c8f5';
+// const ACCESS_TOKEN = '1d75ffdd91e81516eff0a932ed77c8f5';
+// const REFRESH_TOKEN = '1d75fffeia0981jf9asaa932ed77c8f5';
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, //15 minutes
@@ -21,48 +20,57 @@ const authLimiter = rateLimit({
 //GET ONE
 router.get('/users', authMiddleware, async (req, res) => {
   try {
-    const users = await User.findById(req.user.userId).select('-password -refreshTokens'); 
-    if (!user) {
+    const [result] = await pool.execute(
+      'SELECT * FROM `users` WHERE email = ?', 
+      req.user.userId
+    );
+
+    if (result.length <= 0) {
       return res.status(404).json({ message: 'User not found' }); 
     }
 
-    res.json(user); 
+    res.json(result); 
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 });
 
 //REGISTER
-router.post('/register', authMiddleware, async (req, res) => {
+router.post('/register', authLimiter, async (req, res) => {
   try {
-    const existingUser = await User.findOne({ email: req.body.email }); 
-    if (existingUser) {
+    const [exist] = await pool.execute(
+      'SELECT * FROM `users` WHERE `email` = ?',
+      [req.body.email]
+    );
+
+    if (exist.fieldCount > 0) {
       return res.status(400).json({ message: 'Email already registered' }); 
     }
 
     const hashedPass = await bcrypt.hash(req.body.password, 10); 
-    const user = new User({
-      name: req.body.name,
-      email: req.body.email, 
-      password: hashedPass
-    });
+    
+    const [results] = await pool.execute(
+      'INSERT INTO `users` (email, password) VALUES (?, ?)',
+      [req.body.email, hashedPass]
+    );
 
-    const newUser = await user.save(); 
+    if(results.affectedRows <= 0) return res.status(400).json({message: 'Unique email and a password needs to be given'});
 
-    const userData = { userId: newUser._id, email: newUser.email }; 
-    const accessToken = jwt.sign(userData, ACCESS_TOKEN, { expiresIn: '15m' }); 
-    const refreshToken = jwt.sign({ userId: newUser._id }, REFRESH_TOKEN, { expiresIn: '7d' }); 
-
-    newUser.refreshTokens.push({ token: refreshToken }); 
-    await newUser.save(); 
+    const userData = { id: results.insertId, email: req.body.email }; 
+    const accessToken = jwt.sign(userData, process.env.ACCESS_TOKEN, { expiresIn: '15m' }); 
+    const refreshToken = jwt.sign({ userId: results.insertId }, process.env.REFRESH_TOKEN, { expiresIn: '7d' }); 
+      
+    await pool.execute(
+      'INSERT INTO refresh_tokens (user_id, token) VALUES (?,?)', 
+      [results.insertId, refreshToken]
+    );
 
     res.status(201).json({
       accessToken, 
       refreshToken, 
       user: {
-        id: newUser._id, 
-        name: newUser.name, 
-        email: newUser.email
+        id: results.insertId, 
+        email: req.body.email
       }
     }); 
   } catch (error) {
@@ -73,36 +81,40 @@ router.post('/register', authMiddleware, async (req, res) => {
 //LOGIN
 router.post('/login', authLimiter, async (req, res) => {
   try {
-    const user = await User.findOne({ email: req.body.email }); 
-    if(!user) return res.status(404).json({ message: 'User not found' });
-
+    const [rows] = await pool.execute(
+      'SELECT id, email, password FROM `users` WHERE `email` = ?',
+      [req.body.email]
+    );
+    const user = rows[0];
+    if (user.length <= 0) {
+      return res.status(404).json({ message: 'User not found' }); 
+    }
+    
     const correct = await bcrypt.compare(req.body.password, user.password); 
-
     if(!correct) {
       return res.status(401).json({ message: 'Invalid credentials' }); 
     }
+
     //generate token
-    const userData = { userId: user._id, email: user.email };
-    const accessToken = jwt.sign(userData, ACCESS_TOKEN, {expiresIn: '15m'});
-    const refreshToken = jwt.sign({ userId: user._id }, REFRESH_TOKEN, { expiresIn: '7d' }); 
-
-    user.refreshTokens.push({ token: refreshToken }); 
-
-    if (user.refreshTokens.length > 5) {
-      user.refreshTokens.shift(); 
-    }
-    await user.save(); 
+    const userData = { userId: user.id, email: user.email };
+    const accessToken = jwt.sign(userData, process.env.ACCESS_TOKEN, {expiresIn: '15m'});
+    const refreshToken = jwt.sign({ userId: user.id }, process.env.REFRESH_TOKEN, { expiresIn: '7d' }); 
+    
+    await pool.execute(
+      'INSERT INTO refresh_tokens (user_id, token) VALUES (?,?)', 
+      [user.id, refreshToken]
+    );
 
     res.status(200).json({ 
       accessToken, 
       refreshToken, 
       user: {
-        id: user._id, 
-        name: user.name, 
+        id: user.id, 
         email: user.email
       }
     });
   } catch (error) {
+    console.log(error);
     res.status(500).json({ message: error.message });
   }
 });
@@ -114,26 +126,27 @@ router.post('/refresh-token', async (req, res) => {
       return res.status(401).json({ message: 'Refresh token required' }); 
     }
 
-    const decoded = jwt.verify(refreshToken, REFRESH_TOKEN); 
-
-    const user = await User.findOne({
-      _id: decoded.userId, 
-      'refreshTokens.token': refreshToken
-    }); 
+    const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN); 
+    const [rows] = await pool.execute(
+      'SELECT users.id, users.email FROM users ' + 
+      'JOIN refresh_tokens AS rt ON rt.user_id = users.id ' + 
+      'WHERE users.id = ? AND rt.token = ?', 
+      [decoded.userId, refreshToken]
+    );
+    const user = rows[0];
 
     if (!user) {
       return res.status(403).json({ message: 'Invalid refresh token' }); 
     }
 
-    const userData = { userId: user._id, email: user.email }; 
-    const newAccessToken = jwt.sign(userData, ACCESS_TOKEN, { expiresIn: '15m' }); 
+    const userData = { userId: user.id, email: user.email }; 
+    const newAccessToken = jwt.sign(userData, process.env.ACCESS_TOKEN, { expiresIn: '15m' }); 
 
     res.json({ accessToken: newAccessToken }); 
   } catch (error) {
     if (error.name === 'TokenExpiredError') {
       return res.status(403).json({ message: 'Refresh token expired, please login again'}); 
     }
-
     res.status(403).json({ message: 'Invalid refresh token' }); 
   }
 }); 
@@ -141,9 +154,11 @@ router.post('/refresh-token', async (req, res) => {
 router.post('/logout', authMiddleware, async (req, res) => {
   try {
     const { refreshToken } = req.body;
-    await User.findByIdAndUpdate(req.user.userId, {
-      $pull: { refreshTokens: { token: refreshToken }}
-    }); 
+    
+    await pool.execute(
+      'DELETE FROM refresh_tokens WHERE user_id = ? AND token = ?', 
+      [req.user.userId, refreshToken]
+    );
 
     res.json({ message: 'Logged out successfully' }); 
   } catch (error) {
@@ -153,10 +168,10 @@ router.post('/logout', authMiddleware, async (req, res) => {
 
 router.post('/logout-all', authMiddleware, async (req, res) => {
   try {
-    await user.findByIdAndUpdate(req.user.userId, {
-      refreshTokens: []
-    }); 
-
+    await pool.execute(
+      'DELETE FROM refresh_tokens WHERE user_id = ? ', 
+      [req.user.userId]
+    );
     res.json({ message: 'Logged out from all devices' }); 
   } catch (error) {
     res.status(400).json({ error: error.message }); 

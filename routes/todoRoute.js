@@ -1,10 +1,9 @@
 const express = require('express'); 
 const router = express.Router(); 
-const mongoose = require('mongoose'); 
-const Todo = require('../models/Todo'); 
 const jwt = require('jsonwebtoken'); 
 const rateLimit = require('express-rate-limit'); 
 const { authMiddleware } = require('../middleware/auth'); 
+const { pool } = require('../db');
 
 const todoLimiter = rateLimit({
   windowMs: 2 * 60 * 1000,

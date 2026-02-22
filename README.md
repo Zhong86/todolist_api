@@ -2,7 +2,7 @@
 
 Tools: <br>
 -Express <br>
--MongoDB <br>
+-MariaDB <br>
 -JWT Auth <br>
 
 [x] User registration to create a new user <br>

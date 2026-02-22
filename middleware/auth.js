@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken'); 
-const ACCESS_TOKEN = '1d75ffdd91e81516eff0a932ed77c8f5';
+require('dotenv').config;
 
 function authMiddleware(req, res, next) {
   try {
@@ -9,7 +9,7 @@ function authMiddleware(req, res, next) {
       return res.status(401).json({ error: 'No token provided' }); 
     }
 
-    const decoded = jwt.verify(token, ACCESS_TOKEN); 
+    const decoded = jwt.verify(token, process.env.ACCESS_TOKEN); 
     req.user = decoded; 
     next(); 
   } catch (error) {
@@ -23,4 +23,4 @@ function authMiddleware(req, res, next) {
   }
 }
 
-module.exports = { authMiddleware, ACCESS_TOKEN };
+module.exports = { authMiddleware };
